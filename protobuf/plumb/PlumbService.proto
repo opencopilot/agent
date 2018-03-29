@@ -1,0 +1,17 @@
+syntax = "proto3";
+package plumb;
+
+service PlumbAgent {
+    rpc GetStatus(StatusRequest) returns (Status) {}
+    rpc Configure(ConfigureRequest) returns (Status) {}
+}
+
+message StatusRequest {}
+
+message ConfigureRequest {
+    string config = 1;
+}
+
+message Status {
+
+}
