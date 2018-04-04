@@ -11,7 +11,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	dockerClient "github.com/docker/docker/client"
 	consulClient "github.com/hashicorp/consul/api"
-	pb "github.com/patrickdevivo/plumb-agent/protobuf/plumb"
+	pb "github.com/opencopilot/ocp-agent/protobuf/OpenCoPilot"
 )
 
 // AgentGetStatus returns the status of a running service
@@ -96,7 +96,7 @@ func AgentStopService(ctx context.Context, containerID string) (*pb.Status, erro
 }
 
 // AgentGetServiceLogs returns a stream of logs from a container. TODO: add parameters for limiting how many log lines to return
-func AgentGetServiceLogs(containerID string, stream pb.PlumbAgent_GetServiceLogsServer) error {
+func AgentGetServiceLogs(containerID string, stream pb.OCPAgent_GetServiceLogsServer) error {
 	dockerCli, err := dockerClient.NewEnvClient()
 	if err != nil {
 		return err

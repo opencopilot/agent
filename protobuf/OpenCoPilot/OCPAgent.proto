@@ -1,7 +1,7 @@
 syntax = "proto3";
-package plumb;
+package opencopilot;
 
-service PlumbAgent {
+service OCPAgent {
     rpc GetStatus(StatusRequest) returns (Status) {}
     rpc StartService(StartServiceRequest) returns (Status) {}
     rpc ConfigureService(ConfigureServiceRequest) returns (Status) {}

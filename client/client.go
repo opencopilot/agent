@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	pb "github.com/patrickdevivo/plumb-agent/protobuf/plumb"
+	pb "github.com/opencopilot/ocp-agent/protobuf/OpenCoPilot"
 	"google.golang.org/grpc"
 )
 
@@ -20,7 +20,7 @@ func main() {
 		log.Fatalf("did not connect: %v", err)
 	}
 	defer conn.Close()
-	c := pb.NewPlumbAgentClient(conn)
+	c := pb.NewOCPAgentClient(conn)
 
 	// r, err := c.StartService(context.Background(), &pb.StartServiceRequest{Image: "ghost"})
 	r, err := c.GetStatus(context.Background(), &pb.StatusRequest{})

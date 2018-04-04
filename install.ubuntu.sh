@@ -31,15 +31,15 @@ WantedBy=multi-user.target
 ### Start Consul ###
 systemctl start consul
 
-### Install plumb-agent ###
+### Install ocp-agent ###
 
 # TODO: pull from github?
 
-### Setup plumb-agent ###
+### Setup ocp-agent ###
 
 # TODO: similar to Consul setup, add systemd service
 # TODO: will likely have to grab keys from somewhere...Vault? for encrypting public gRPC endpoint
 
-### Start plumb-agent ###
+### Start ocp-agent ###
 
-# TODO: systemctl start plumb-agent
+# TODO: systemctl start ocp-agent

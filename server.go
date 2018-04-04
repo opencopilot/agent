@@ -7,7 +7,7 @@ import (
 	"net"
 	"os"
 
-	pb "github.com/patrickdevivo/plumb-agent/protobuf/plumb"
+	pb "github.com/opencopilot/ocp-agent/protobuf/OpenCoPilot"
 	"go.uber.org/zap"
 
 	"google.golang.org/grpc"
@@ -46,7 +46,7 @@ func (s *server) StopService(ctx context.Context, in *pb.StopServiceRequest) (*p
 	return AgentStopService(ctx, in.ContainerId)
 }
 
-func (s *server) GetServiceLogs(in *pb.GetServiceLogsRequest, stream pb.PlumbAgent_GetServiceLogsServer) error {
+func (s *server) GetServiceLogs(in *pb.GetServiceLogsRequest, stream pb.OCPAgent_GetServiceLogsServer) error {
 	return AgentGetServiceLogs(in.ContainerId, stream)
 }
 
@@ -85,7 +85,7 @@ func servePublicGRPC() {
 			grpc_recovery.UnaryServerInterceptor(),
 		)),
 	)
-	pb.RegisterPlumbAgentServer(s, &server{})
+	pb.RegisterOCPAgentServer(s, &server{})
 	// Register reflection service on gRPC server.
 	reflection.Register(s)
 	s.Serve(lis)
@@ -100,7 +100,7 @@ func servePrivateGRPC() {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	s := grpc.NewServer()
-	pb.RegisterPlumbAgentServer(s, &server{})
+	pb.RegisterOCPAgentServer(s, &server{})
 
 	// Register reflection service on gRPC server.
 	reflection.Register(s)
