@@ -6,7 +6,7 @@ import (
 
 	dockerTypes "github.com/docker/docker/api/types"
 	dockerClient "github.com/docker/docker/client"
-	pb "github.com/opencopilot/ocp-agent/protobuf/OpenCoPilot"
+	pb "github.com/opencopilot/ocopi-agent/protobuf/OpenCoPilot"
 )
 
 // AgentGetStatus returns the status of a running service

@@ -1,7 +1,7 @@
 syntax = "proto3";
 package opencopilot;
 
-service OCPAgent {
+service OCoPiAgent {
     rpc GetStatus(StatusRequest) returns (Status) {}
     // rpc StartService(StartServiceRequest) returns (Status) {}
     // rpc ConfigureService(ConfigureServiceRequest) returns (Status) {}

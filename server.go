@@ -10,7 +10,7 @@ import (
 	"os"
 	"strconv"
 
-	pb "github.com/opencopilot/ocp-agent/protobuf/OpenCoPilot"
+	pb "github.com/opencopilot/ocopi-agent/protobuf/OpenCoPilot"
 	"go.uber.org/zap"
 
 	"google.golang.org/grpc"
@@ -91,7 +91,7 @@ func (s *server) StopService(ctx context.Context, in *pb.StopServiceRequest) (*p
 	return AgentGetStatus(ctx)
 }
 
-func (s *server) GetServiceLogs(in *pb.GetServiceLogsRequest, stream pb.OCPAgent_GetServiceLogsServer) error {
+func (s *server) GetServiceLogs(in *pb.GetServiceLogsRequest, stream pb.OCoPiAgent_GetServiceLogsServer) error {
 
 	options := dockerTypes.ContainerLogsOptions{ShowStdout: true}
 	out, err := s.dockerClient.ContainerLogs(context.Background(), in.ContainerId, options)
@@ -165,7 +165,7 @@ func servePublicGRPC() {
 		log.Fatalf("failed to setup consul client on public gRPC server")
 	}
 
-	pb.RegisterOCPAgentServer(s, &server{
+	pb.RegisterOCoPiAgentServer(s, &server{
 		dockerClient: *dockerCli,
 		consulClient: *consulCli,
 	})
@@ -183,7 +183,7 @@ func servePrivateGRPC() {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	s := grpc.NewServer()
-	pb.RegisterOCPAgentServer(s, &server{})
+	pb.RegisterOCoPiAgentServer(s, &server{})
 
 	// Register reflection service on gRPC server.
 	reflection.Register(s)
