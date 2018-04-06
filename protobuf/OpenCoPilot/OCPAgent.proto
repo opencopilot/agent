@@ -3,9 +3,9 @@ package opencopilot;
 
 service OCPAgent {
     rpc GetStatus(StatusRequest) returns (Status) {}
-    rpc StartService(StartServiceRequest) returns (Status) {}
-    rpc ConfigureService(ConfigureServiceRequest) returns (Status) {}
-    rpc StopService(StopServiceRequest) returns (Status) {}
+    // rpc StartService(StartServiceRequest) returns (Status) {}
+    // rpc ConfigureService(ConfigureServiceRequest) returns (Status) {}
+    // rpc StopService(StopServiceRequest) returns (Status) {}
     rpc GetServiceLogs(GetServiceLogsRequest) returns (stream ServiceLogLine) {}
 
     rpc SetServiceGRPC(SetServiceGRPCRequest) returns (Status) {}

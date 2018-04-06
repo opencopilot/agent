@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"os"
+	"strconv"
 
 	pb "github.com/opencopilot/ocp-agent/protobuf/OpenCoPilot"
 	"go.uber.org/zap"
@@ -17,6 +20,11 @@ import (
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	"github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/grpc-ecosystem/go-grpc-middleware/tags"
+
+	dockerTypes "github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
+	dockerClient "github.com/docker/docker/client"
+	consulClient "github.com/hashicorp/consul/api"
 )
 
 const (
@@ -28,30 +36,92 @@ var (
 	AgentID = os.Getenv("AGENT_ID")
 )
 
-type server struct{}
+type server struct {
+	dockerClient dockerClient.Client
+	consulClient consulClient.Client
+}
 
 func (s *server) GetStatus(ctx context.Context, in *pb.StatusRequest) (*pb.Status, error) {
 	return AgentGetStatus(ctx)
 }
 
 func (s *server) StartService(ctx context.Context, in *pb.StartServiceRequest) (*pb.Status, error) {
-	return AgentStartService(ctx, in.ImageRef)
+	reader, err := s.dockerClient.ImagePull(ctx, in.ImageRef, dockerTypes.ImagePullOptions{})
+	_ = reader
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := s.dockerClient.ContainerCreate(ctx, &container.Config{
+		Image: in.ImageRef,
+	}, nil, nil, "")
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.dockerClient.ContainerStart(ctx, resp.ID, dockerTypes.ContainerStartOptions{}); err != nil {
+		return nil, err
+	}
+
+	status, error := AgentGetStatus(ctx)
+	return status, error
 }
 
 func (s *server) ConfigureService(ctx context.Context, in *pb.ConfigureServiceRequest) (*pb.Status, error) {
-	return AgentConfigureService(ctx, in.ContainerId)
+
+	kv := s.consulClient.KV()
+
+	pair, _, err := kv.Get(AgentID+"/"+in.ContainerId, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if pair.Value != nil {
+		fmt.Printf("KV: %s\n", pair.Value)
+	}
+
+	return AgentGetStatus(ctx)
 }
 
 func (s *server) StopService(ctx context.Context, in *pb.StopServiceRequest) (*pb.Status, error) {
-	return AgentStopService(ctx, in.ContainerId)
+	if err := s.dockerClient.ContainerStop(ctx, in.ContainerId, nil); err != nil {
+		return nil, err
+	}
+
+	return AgentGetStatus(ctx)
 }
 
 func (s *server) GetServiceLogs(in *pb.GetServiceLogsRequest, stream pb.OCPAgent_GetServiceLogsServer) error {
-	return AgentGetServiceLogs(in.ContainerId, stream)
+
+	options := dockerTypes.ContainerLogsOptions{ShowStdout: true}
+	out, err := s.dockerClient.ContainerLogs(context.Background(), in.ContainerId, options)
+	if err != nil {
+		return err
+	}
+
+	scanner := bufio.NewScanner(out)
+
+	for scanner.Scan() {
+		t := scanner.Text()
+		l := &pb.ServiceLogLine{Line: t}
+		if err := stream.Send(l); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *server) SetServiceGRPC(ctx context.Context, in *pb.SetServiceGRPCRequest) (*pb.Status, error) {
-	return AgentSetServiceGRPC(ctx, in.ContainerId, in.Port)
+	kv := s.consulClient.KV()
+
+	p := &consulClient.KVPair{Key: AgentID + "/" + in.ContainerId, Value: []byte(strconv.Itoa(int(in.Port)))}
+	_, err := kv.Put(p, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return AgentGetStatus(ctx)
 }
 
 func servePublicGRPC() {
@@ -85,7 +155,20 @@ func servePublicGRPC() {
 			grpc_recovery.UnaryServerInterceptor(),
 		)),
 	)
-	pb.RegisterOCPAgentServer(s, &server{})
+	dockerCli, err := dockerClient.NewEnvClient()
+	if err != nil {
+		log.Fatalf("failed to setup docker client on public gRPC server")
+	}
+
+	consulCli, err := consulClient.NewClient(consulClient.DefaultConfig())
+	if err != nil {
+		log.Fatalf("failed to setup consul client on public gRPC server")
+	}
+
+	pb.RegisterOCPAgentServer(s, &server{
+		dockerClient: *dockerCli,
+		consulClient: *consulCli,
+	})
 	// Register reflection service on gRPC server.
 	reflection.Register(s)
 	s.Serve(lis)
