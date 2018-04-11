@@ -6,16 +6,16 @@ import (
 
 	dockerTypes "github.com/docker/docker/api/types"
 	dockerClient "github.com/docker/docker/client"
-	pb "github.com/opencopilot/ocopi-agent/protobuf/OpenCoPilot"
+	pb "github.com/opencopilot/agent/agent"
 )
 
 // AgentGetStatus returns the status of a running service
-func AgentGetStatus(ctx context.Context) (*pb.Status, error) {
+func AgentGetStatus(ctx context.Context) (*pb.AgentStatus, error) {
 	dockerCli, err := dockerClient.NewEnvClient()
 	if err != nil {
 		return nil, err
 	}
-	status := &pb.Status{AgentId: AgentID, Services: []*pb.Status_AgentService{}}
+	status := &pb.AgentStatus{AgentId: AgentID, Services: []*pb.AgentStatus_AgentService{}}
 
 	containers, err := dockerCli.ContainerList(ctx, dockerTypes.ContainerListOptions{})
 	if err != nil {
@@ -23,7 +23,7 @@ func AgentGetStatus(ctx context.Context) (*pb.Status, error) {
 	}
 
 	for _, container := range containers {
-		status.Services = append(status.Services, &pb.Status_AgentService{Id: container.ID, Image: container.Image})
+		status.Services = append(status.Services, &pb.AgentStatus_AgentService{Id: container.ID, Image: container.Image})
 	}
 
 	return status, nil

@@ -1,0 +1,17 @@
+syntax = "proto3";
+package opencopilot;
+
+service Manager {
+    rpc GetStatus(ManagerStatusRequest) returns (ManagerStatus) {}
+    rpc Configure(ConfigureRequest) returns (ManagerStatus) {}
+}
+
+message ManagerStatusRequest {}
+
+message ConfigureRequest {
+    string config = 1;
+}
+
+message ManagerStatus {
+
+}

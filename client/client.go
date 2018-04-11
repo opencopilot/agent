@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	pb "github.com/opencopilot/ocp-agent/protobuf/OpenCoPilot"
+	pb "github.com/opencopilot/agent/agent"
 	"google.golang.org/grpc"
 )
 
@@ -20,7 +20,7 @@ func main() {
 		log.Fatalf("did not connect: %v", err)
 	}
 	defer conn.Close()
-	c := pb.NewOCPAgentClient(conn)
+	c := pb.NewAgentClient(conn)
 
 	// r, err := c.StartService(context.Background(), &pb.StartServiceRequest{Image: "ghost"})
 	r, err := c.GetStatus(context.Background(), &pb.StatusRequest{})

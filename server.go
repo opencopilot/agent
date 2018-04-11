@@ -10,7 +10,8 @@ import (
 	"os"
 	"strconv"
 
-	pb "github.com/opencopilot/ocopi-agent/protobuf/OpenCoPilot"
+	pb "github.com/opencopilot/agent/agent"
+	pbManager "github.com/opencopilot/agent/manager"
 	"go.uber.org/zap"
 
 	"google.golang.org/grpc"
@@ -22,7 +23,6 @@ import (
 	"github.com/grpc-ecosystem/go-grpc-middleware/tags"
 
 	dockerTypes "github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
 	dockerClient "github.com/docker/docker/client"
 	consulClient "github.com/hashicorp/consul/api"
 )
@@ -41,57 +41,57 @@ type server struct {
 	consulClient consulClient.Client
 }
 
-func (s *server) GetStatus(ctx context.Context, in *pb.StatusRequest) (*pb.Status, error) {
+func (s *server) GetStatus(ctx context.Context, in *pb.AgentStatusRequest) (*pb.AgentStatus, error) {
 	return AgentGetStatus(ctx)
 }
 
-func (s *server) StartService(ctx context.Context, in *pb.StartServiceRequest) (*pb.Status, error) {
-	reader, err := s.dockerClient.ImagePull(ctx, in.ImageRef, dockerTypes.ImagePullOptions{})
-	_ = reader
-	if err != nil {
-		return nil, err
-	}
+// func (s *server) StartService(ctx context.Context, in *pb.StartServiceRequest) (*pb.AgentStatus, error) {
+// 	reader, err := s.dockerClient.ImagePull(ctx, in.ImageRef, dockerTypes.ImagePullOptions{})
+// 	_ = reader
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	resp, err := s.dockerClient.ContainerCreate(ctx, &container.Config{
-		Image: in.ImageRef,
-	}, nil, nil, "")
-	if err != nil {
-		return nil, err
-	}
+// 	resp, err := s.dockerClient.ContainerCreate(ctx, &container.Config{
+// 		Image: in.ImageRef,
+// 	}, nil, nil, "")
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	if err := s.dockerClient.ContainerStart(ctx, resp.ID, dockerTypes.ContainerStartOptions{}); err != nil {
-		return nil, err
-	}
+// 	if err := s.dockerClient.ContainerStart(ctx, resp.ID, dockerTypes.ContainerStartOptions{}); err != nil {
+// 		return nil, err
+// 	}
 
-	status, error := AgentGetStatus(ctx)
-	return status, error
-}
+// 	status, error := AgentGetStatus(ctx)
+// 	return status, error
+// }
 
-func (s *server) ConfigureService(ctx context.Context, in *pb.ConfigureServiceRequest) (*pb.Status, error) {
+// func (s *server) ConfigureService(ctx context.Context, in *pb.ConfigureServiceRequest) (*pb.AgentStatus, error) {
 
-	kv := s.consulClient.KV()
+// 	kv := s.consulClient.KV()
 
-	pair, _, err := kv.Get(AgentID+"/"+in.ContainerId, nil)
-	if err != nil {
-		return nil, err
-	}
+// 	pair, _, err := kv.Get(AgentID+"/"+in.ContainerId, nil)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	if pair.Value != nil {
-		fmt.Printf("KV: %s\n", pair.Value)
-	}
+// 	if pair.Value != nil {
+// 		fmt.Printf("KV: %s\n", pair.Value)
+// 	}
 
-	return AgentGetStatus(ctx)
-}
+// 	return AgentGetStatus(ctx)
+// }
 
-func (s *server) StopService(ctx context.Context, in *pb.StopServiceRequest) (*pb.Status, error) {
-	if err := s.dockerClient.ContainerStop(ctx, in.ContainerId, nil); err != nil {
-		return nil, err
-	}
+// func (s *server) StopService(ctx context.Context, in *pb.StopServiceRequest) (*pb.AgentStatus, error) {
+// 	if err := s.dockerClient.ContainerStop(ctx, in.ContainerId, nil); err != nil {
+// 		return nil, err
+// 	}
 
-	return AgentGetStatus(ctx)
-}
+// 	return AgentGetStatus(ctx)
+// }
 
-func (s *server) GetServiceLogs(in *pb.GetServiceLogsRequest, stream pb.OCoPiAgent_GetServiceLogsServer) error {
+func (s *server) GetServiceLogs(in *pb.GetServiceLogsRequest, stream pb.Agent_GetServiceLogsServer) error {
 
 	options := dockerTypes.ContainerLogsOptions{ShowStdout: true}
 	out, err := s.dockerClient.ContainerLogs(context.Background(), in.ContainerId, options)
@@ -112,7 +112,7 @@ func (s *server) GetServiceLogs(in *pb.GetServiceLogsRequest, stream pb.OCoPiAge
 	return nil
 }
 
-func (s *server) SetServiceGRPC(ctx context.Context, in *pb.SetServiceGRPCRequest) (*pb.Status, error) {
+func (s *server) SetServiceGRPC(ctx context.Context, in *pb.SetServiceGRPCRequest) (*pb.AgentStatus, error) {
 	kv := s.consulClient.KV()
 
 	p := &consulClient.KVPair{Key: AgentID + "/" + in.ContainerId, Value: []byte(strconv.Itoa(int(in.Port)))}
@@ -165,7 +165,7 @@ func servePublicGRPC() {
 		log.Fatalf("failed to setup consul client on public gRPC server")
 	}
 
-	pb.RegisterOCoPiAgentServer(s, &server{
+	pb.RegisterAgentServer(s, &server{
 		dockerClient: *dockerCli,
 		consulClient: *consulCli,
 	})
@@ -183,7 +183,7 @@ func servePrivateGRPC() {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	s := grpc.NewServer()
-	pb.RegisterOCoPiAgentServer(s, &server{})
+	pb.RegisterAgentServer(s, &server{})
 
 	// Register reflection service on gRPC server.
 	reflection.Register(s)
@@ -191,6 +191,14 @@ func servePrivateGRPC() {
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
+}
+func getManagerClient(port int) (pbManager.ManagerClient, *grpc.ClientConn) {
+	conn, err := grpc.Dial(fmt.Sprintf("127.0.0.1:%d", port), grpc.WithInsecure())
+	if err != nil {
+		log.Fatalf("did not connect: %v", err)
+	}
+	// defer conn.Close()
+	return pbManager.NewManagerClient(conn), conn
 }
 
 func main() {
