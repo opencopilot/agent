@@ -39,7 +39,7 @@ message ServiceLogLine {
 }
 
 message AgentStatus {
-    string agent_id = 1;
+    string instance_id = 1;
     repeated AgentService services = 2;
 
     message AgentService {
