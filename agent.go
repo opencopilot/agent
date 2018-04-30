@@ -18,7 +18,8 @@ import (
 	consul "github.com/hashicorp/consul/api"
 	pb "github.com/opencopilot/agent/agent"
 	managerPb "github.com/opencopilot/agent/manager"
-	consulkvjson "github.com/opencopilot/consul-kv-json"
+	"github.com/opencopilot/consul-kv-json"
+	"gopkg.in/yaml.v2"
 )
 
 // Service is a specification for a service running on the device
@@ -169,19 +170,26 @@ func (agent *Agent) startService(service Service) error {
 	log.Printf("adding service: %s\n", string(service))
 
 	ctx := context.Background()
+	serviceImageYaml, err := ioutil.ReadFile("./services.yaml")
+	if err != nil {
+		log.Fatal(err)
+	}
+	serviceImageMap := make(map[interface{}]interface{})
+	yamlErr := yaml.Unmarshal(serviceImageYaml, &serviceImageMap)
+	if yamlErr != nil {
+		log.Fatal(yamlErr)
+	}
 
-	var containerConfig *container.Config
-	switch string(service) {
-	case "LB":
-		containerConfig = &container.Config{
-			Image: "quay.io/opencopilot/haproxy-manager",
-			Labels: map[string]string{
-				"com.opencopilot.managed":         "",
-				"com.opencopilot.service-manager": string(service),
-			},
-		}
-	default:
-		return errors.New("Invalid service specified")
+	if serviceImageMap[string(service)] == nil {
+		log.Fatal(errors.New("invalid service specified"))
+	}
+
+	containerConfig := &container.Config{
+		Labels: map[string]string{
+			"com.opencopilot.managed":         "",
+			"com.opencopilot.service-manager": string(service),
+		},
+		Image: serviceImageMap[string(service)].(string),
 	}
 
 	reader, err := agent.dockerCli.ImagePull(ctx, containerConfig.Image, dockerTypes.ImagePullOptions{})
