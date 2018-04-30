@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"strconv"
 
 	pb "github.com/opencopilot/agent/agent"
 
@@ -13,18 +12,26 @@ import (
 )
 
 type server struct {
-	dockerClient docker.Client
-	consulClient consul.Client
+	dockerCli *docker.Client
+	consulCli *consul.Client
+}
+
+func (s *server) ToAgent() *Agent {
+	return &Agent{
+		dockerCli: s.dockerCli,
+		consulCli: s.consulCli,
+	}
 }
 
 func (s *server) GetStatus(ctx context.Context, in *pb.AgentStatusRequest) (*pb.AgentStatus, error) {
-	return AgentGetStatus(ctx)
+	agent := s.ToAgent()
+	return agent.AgentGetStatus(ctx)
 }
 
 func (s *server) GetServiceLogs(in *pb.GetServiceLogsRequest, stream pb.Agent_GetServiceLogsServer) error {
 
 	options := dockerTypes.ContainerLogsOptions{ShowStdout: true}
-	out, err := s.dockerClient.ContainerLogs(context.Background(), in.ContainerId, options)
+	out, err := s.dockerCli.ContainerLogs(context.Background(), in.ContainerId, options)
 	if err != nil {
 		return err
 	}
@@ -40,16 +47,4 @@ func (s *server) GetServiceLogs(in *pb.GetServiceLogsRequest, stream pb.Agent_Ge
 	}
 
 	return nil
-}
-
-func (s *server) SetServiceGRPC(ctx context.Context, in *pb.SetServiceGRPCRequest) (*pb.AgentStatus, error) {
-	kv := s.consulClient.KV()
-
-	p := &consul.KVPair{Key: InstanceID + "/" + in.ContainerId, Value: []byte(strconv.Itoa(int(in.Port)))}
-	_, err := kv.Put(p, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return AgentGetStatus(ctx)
 }

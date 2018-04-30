@@ -8,7 +8,7 @@ service Agent {
     // rpc StopService(StopServiceRequest) returns (Status) {}
     rpc GetServiceLogs(GetServiceLogsRequest) returns (stream ServiceLogLine) {}
 
-    rpc SetServiceGRPC(SetServiceGRPCRequest) returns (AgentStatus) {}
+    // rpc SetServiceGRPC(SetServiceGRPCRequest) returns (AgentStatus) {}
 }
 
 message AgentStatusRequest {}
@@ -25,10 +25,10 @@ message StopServiceRequest {
     string container_id = 1;
 }
 
-message SetServiceGRPCRequest {
-    string container_id = 1;
-    int32 port = 2;
-}
+// message SetServiceGRPCRequest {
+//     string container_id = 1;
+//     int32 port = 2;
+// }
 
 message GetServiceLogsRequest {
     string container_id = 1;

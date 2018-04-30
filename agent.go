@@ -14,7 +14,7 @@ import (
 	"github.com/buger/jsonparser"
 	dockerTypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
-	dockerClient "github.com/docker/docker/client"
+	docker "github.com/docker/docker/client"
 	consul "github.com/hashicorp/consul/api"
 	pb "github.com/opencopilot/agent/agent"
 	managerPb "github.com/opencopilot/agent/manager"
@@ -27,15 +27,18 @@ type Service string
 // Services is a list of Service
 type Services []Service
 
+// Agent handles agent functionality
+type Agent struct {
+	dockerCli *docker.Client
+	consulCli *consul.Client
+}
+
 // AgentGetStatus returns the status of a running service
-func AgentGetStatus(ctx context.Context) (*pb.AgentStatus, error) {
-	dockerCli, err := dockerClient.NewEnvClient()
-	if err != nil {
-		return nil, err
-	}
+func (agent *Agent) AgentGetStatus(ctx context.Context) (*pb.AgentStatus, error) {
+
 	status := &pb.AgentStatus{InstanceId: InstanceID, Services: []*pb.AgentStatus_AgentService{}}
 
-	containers, err := dockerCli.ContainerList(ctx, dockerTypes.ContainerListOptions{})
+	containers, err := agent.dockerCli.ContainerList(ctx, dockerTypes.ContainerListOptions{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -48,7 +51,7 @@ func AgentGetStatus(ctx context.Context) (*pb.AgentStatus, error) {
 }
 
 // ConfigHandler runs when the service configuration for this instance changes
-func ConfigHandler(kvs consul.KVPairs) {
+func (agent *Agent) ConfigHandler(kvs consul.KVPairs) {
 	HandlingServices = true
 	m, err := consulkvjson.ConsulKVsToJSON(kvs)
 	if err != nil {
@@ -61,7 +64,7 @@ func ConfigHandler(kvs consul.KVPairs) {
 	// fmt.Printf("%s, %v", jsonString, m)
 	_, valueType, _, err := jsonparser.Get(jsonString, "instances", InstanceID, "services")
 	if valueType == jsonparser.NotExist {
-		ensureServices(Services{})
+		agent.ensureServices(Services{})
 		return
 	}
 
@@ -77,26 +80,21 @@ func ConfigHandler(kvs consul.KVPairs) {
 		incomingServices = append(incomingServices, service)
 	}
 
-	ensureServices(incomingServices)
-	localServices, err := getLocalServices()
+	agent.ensureServices(incomingServices)
+	localServices, err := agent.getLocalServices()
 	if err != nil {
 		log.Fatal(err)
 	}
-	configureServices(localServices)
+	agent.configureServices(localServices)
 
 	HandlingServices = false
 }
 
-func getLocalServices() (Services, error) {
-	cli, err := dockerClient.NewEnvClient()
-	if err != nil {
-		return nil, err
-	}
-
+func (agent *Agent) getLocalServices() (Services, error) {
 	args := filters.NewArgs(
 		filters.Arg("label", "com.opencopilot.managed"),
 	)
-	containers, err := cli.ContainerList(context.Background(), dockerTypes.ContainerListOptions{
+	containers, err := agent.dockerCli.ContainerList(context.Background(), dockerTypes.ContainerListOptions{
 		Filters: args,
 	})
 	if err != nil {
@@ -116,8 +114,8 @@ func getLocalServices() (Services, error) {
 	return localServices, nil
 }
 
-func ensureServices(incomingServices Services) {
-	localServices, err := getLocalServices()
+func (agent *Agent) ensureServices(incomingServices Services) {
+	localServices, err := agent.getLocalServices()
 	if err != nil {
 		log.Panicln(err)
 	}
@@ -136,7 +134,7 @@ func ensureServices(incomingServices Services) {
 		if existsLocally {
 			break
 		} else {
-			err := startService(incomingService)
+			err := agent.startService(incomingService)
 			if err != nil {
 				// TODO: do something else here
 				log.Println(err)
@@ -157,7 +155,7 @@ func ensureServices(incomingServices Services) {
 		if existsIncoming {
 			break
 		} else {
-			err := stopService(localService)
+			err := agent.stopService(localService)
 			if err != nil {
 				// TODO: do something else here
 				log.Println(err)
@@ -167,13 +165,8 @@ func ensureServices(incomingServices Services) {
 	}
 }
 
-func startService(service Service) error {
+func (agent *Agent) startService(service Service) error {
 	log.Printf("adding service: %s\n", string(service))
-
-	dockerCli, err := dockerClient.NewEnvClient()
-	if err != nil {
-		return err
-	}
 
 	ctx := context.Background()
 
@@ -191,7 +184,7 @@ func startService(service Service) error {
 		return errors.New("Invalid service specified")
 	}
 
-	reader, err := dockerCli.ImagePull(ctx, containerConfig.Image, dockerTypes.ImagePullOptions{})
+	reader, err := agent.dockerCli.ImagePull(ctx, containerConfig.Image, dockerTypes.ImagePullOptions{})
 	if err != nil {
 		return err
 	}
@@ -203,7 +196,7 @@ func startService(service Service) error {
 
 	containerConfig.Env = []string{"CONFIG_DIR=" + ConfigDir, "INSTANCE_ID=" + InstanceID}
 
-	res, err := dockerCli.ContainerCreate(ctx, containerConfig, &container.HostConfig{
+	res, err := agent.dockerCli.ContainerCreate(ctx, containerConfig, &container.HostConfig{
 		AutoRemove: true, // Important to remove container after it's stopped, so that we can start a new one up with the same name if this service gets re-added
 		Privileged: true, // So that the manager containers can start other docker containers,
 		Binds: []string{ // So that the manager containers have access to Docker on the host
@@ -216,7 +209,7 @@ func startService(service Service) error {
 		return err
 	}
 
-	startErr := dockerCli.ContainerStart(ctx, res.ID, dockerTypes.ContainerStartOptions{})
+	startErr := agent.dockerCli.ContainerStart(ctx, res.ID, dockerTypes.ContainerStartOptions{})
 	if startErr != nil {
 		return startErr
 	}
@@ -224,55 +217,43 @@ func startService(service Service) error {
 	return nil
 }
 
-func stopService(service Service) error {
+func (agent *Agent) stopService(service Service) error {
 	log.Printf("stopping service: %s\n", string(service))
-	dockerCli, err := dockerClient.NewEnvClient()
-	if err != nil {
-		return err
-	}
 
 	ctx := context.Background()
 	args := filters.NewArgs(
 		filters.Arg("label", "com.opencopilot.managed"),
 		filters.Arg("name", "com.opencopilot.service-manager."+string(service)),
 	)
-	containers, err := dockerCli.ContainerList(ctx, dockerTypes.ContainerListOptions{
+	containers, err := agent.dockerCli.ContainerList(ctx, dockerTypes.ContainerListOptions{
 		Filters: args,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 	for _, container := range containers {
-		dockerCli.ContainerStop(ctx, container.ID, nil)
+		agent.dockerCli.ContainerStop(ctx, container.ID, nil)
 	}
 
 	return nil
 }
 
-func configureService(service Service) error {
+func (agent *Agent) configureService(service Service) error {
 	// log.Printf("configuring service: %s\n", string(service))
-	dockerCli, err := dockerClient.NewEnvClient()
-	if err != nil {
-		return err
-	}
 
 	ctx := context.Background()
 	args := filters.NewArgs(
 		filters.Arg("label", "com.opencopilot.managed"),
 		filters.Arg("name", "com.opencopilot.service-manager."+string(service)),
 	)
-	containers, err := dockerCli.ContainerList(ctx, dockerTypes.ContainerListOptions{
+	containers, err := agent.dockerCli.ContainerList(ctx, dockerTypes.ContainerListOptions{
 		Filters: args,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	consulClient, err := consul.NewClient(consul.DefaultConfig())
-	if err != nil {
-		log.Fatal(err)
-	}
-	kv := consulClient.KV()
+	kv := agent.consulCli.KV()
 
 	for _, container := range containers {
 		// log.Println(container.Ports)
@@ -321,10 +302,10 @@ func configureService(service Service) error {
 	return nil
 }
 
-func configureServices(services Services) []error {
+func (agent *Agent) configureServices(services Services) []error {
 	var errorList []error
 	for _, service := range services {
-		err := configureService(service)
+		err := agent.configureService(service)
 		if err != nil {
 			errorList = append(errorList, err)
 		}

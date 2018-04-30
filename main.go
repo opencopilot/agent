@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"os"
@@ -11,7 +10,6 @@ import (
 	docker "github.com/docker/docker/client"
 	consul "github.com/hashicorp/consul/api"
 	pb "github.com/opencopilot/agent/agent"
-	pbManager "github.com/opencopilot/agent/manager"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -35,7 +33,7 @@ const (
 	port = ":50051"
 )
 
-func servePublicGRPC() {
+func servePublicGRPC(server *server) {
 	lis, err := net.Listen("tcp", port)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
@@ -66,20 +64,8 @@ func servePublicGRPC() {
 			grpc_recovery.UnaryServerInterceptor(),
 		)),
 	)
-	dockerCli, err := docker.NewEnvClient()
-	if err != nil {
-		log.Fatalf("failed to setup docker client on public gRPC server")
-	}
 
-	consulCli, err := consul.NewClient(consul.DefaultConfig())
-	if err != nil {
-		log.Fatalf("failed to setup consul client on public gRPC server")
-	}
-
-	pb.RegisterAgentServer(s, &server{
-		dockerClient: *dockerCli,
-		consulClient: *consulCli,
-	})
+	pb.RegisterAgentServer(s, server)
 	// Register reflection service on gRPC server.
 	reflection.Register(s)
 	s.Serve(lis)
@@ -88,13 +74,13 @@ func servePublicGRPC() {
 	}
 }
 
-func servePrivateGRPC() {
+func servePrivateGRPC(server *server) {
 	lis, err := net.Listen("tcp", "127.0.0.1:50050")
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	s := grpc.NewServer()
-	pb.RegisterAgentServer(s, &server{})
+	pb.RegisterAgentServer(s, server)
 
 	// Register reflection service on gRPC server.
 	reflection.Register(s)
@@ -103,18 +89,10 @@ func servePrivateGRPC() {
 		log.Fatalf("failed to serve: %v", err)
 	}
 }
-func getManagerClient(port int) (pbManager.ManagerClient, *grpc.ClientConn) {
-	conn, err := grpc.Dial(fmt.Sprintf("127.0.0.1:%d", port), grpc.WithInsecure())
-	if err != nil {
-		log.Fatalf("did not connect: %v", err)
-	}
-	// defer conn.Close()
-	return pbManager.NewManagerClient(conn), conn
-}
 
 // TODO: use a loop here instead of a recursive call, for debugging purposes
-func watchConfigTree(consulClient *consul.Client, prevIndex uint64, handler func(consul.KVPairs)) error {
-	kv := consulClient.KV()
+func watchConfigTree(agent *Agent, prevIndex uint64, handler func(consul.KVPairs)) error {
+	kv := agent.consulCli.KV()
 	kvs, queryMeta, err := kv.List("instances/"+InstanceID+"/services/", &consul.QueryOptions{
 		WaitIndex: prevIndex,
 	})
@@ -125,20 +103,20 @@ func watchConfigTree(consulClient *consul.Client, prevIndex uint64, handler func
 	if prevIndex != lastIndex {
 		handler(kvs)
 	}
-	watchConfigTree(consulClient, lastIndex, handler)
+	watchConfigTree(agent, lastIndex, handler)
 	return nil
 }
 
-func pollConfigTree(consulClient *consul.Client, interval time.Duration) {
+func pollConfigTree(agent *Agent, interval time.Duration) {
 	time.Sleep(interval) // Give the watchConfigTree time to handle the "first" config change (on first boot of agent)
-	kv := consulClient.KV()
+	kv := agent.consulCli.KV()
 	for {
 		if !HandlingServices {
 			kvs, _, err := kv.List("instances/"+InstanceID+"/services", nil)
 			if err != nil {
 				log.Fatal(err)
 			}
-			ConfigHandler(kvs)
+			agent.ConfigHandler(kvs)
 		}
 		time.Sleep(interval)
 	}
@@ -149,22 +127,34 @@ func main() {
 		panic(errors.New("No instance ID specified"))
 	}
 
-	consulClient, err := consul.NewClient(consul.DefaultConfig())
+	consulCli, err := consul.NewClient(consul.DefaultConfig())
 	if err != nil {
-		panic(err)
+		log.Fatalf("failed to initialize consul client")
 	}
 
+	dockerCli, err := docker.NewEnvClient()
+	if err != nil {
+		log.Fatalf("failed to initialize docker client")
+	}
+
+	server := &server{
+		dockerCli: dockerCli,
+		consulCli: consulCli,
+	}
+
+	agent := server.ToAgent()
+
 	log.Println("Starting to watch Consul KV...")
-	go watchConfigTree(consulClient, 0, ConfigHandler)
+	go watchConfigTree(agent, 0, agent.ConfigHandler)
 
 	log.Println("Starting public gRPC...")
-	go servePublicGRPC()
+	go servePublicGRPC(server)
 
 	log.Println("Starting private gRPC...")
-	go servePrivateGRPC()
+	go servePrivateGRPC(server)
 
 	// TODO: think about how to handle this properly
 	log.Println("Starting to poll Consul KV...")
 	interval, _ := time.ParseDuration("15s")
-	pollConfigTree(consulClient, interval)
+	pollConfigTree(agent, interval)
 }
