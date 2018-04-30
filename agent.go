@@ -51,9 +51,14 @@ func (agent *Agent) AgentGetStatus(ctx context.Context) (*pb.AgentStatus, error)
 	return status, nil
 }
 
-// ConfigHandler runs when the service configuration for this instance changes
-func (agent *Agent) ConfigHandler(kvs consul.KVPairs) {
-	HandlingServices = true
+func (agent *Agent) startConfigHandler(queue chan consul.KVPairs) {
+	for {
+		kvs := <-queue
+		agent.sync(kvs)
+	}
+}
+
+func (agent *Agent) sync(kvs consul.KVPairs) {
 	m, err := consulkvjson.ConsulKVsToJSON(kvs)
 	if err != nil {
 		log.Panic(err)
@@ -62,7 +67,7 @@ func (agent *Agent) ConfigHandler(kvs consul.KVPairs) {
 	if err != nil {
 		log.Panic(err)
 	}
-	// fmt.Printf("%s, %v", jsonString, m)
+
 	_, valueType, _, err := jsonparser.Get(jsonString, "instances", InstanceID, "services")
 	if valueType == jsonparser.NotExist {
 		agent.ensureServices(Services{})
@@ -74,7 +79,7 @@ func (agent *Agent) ConfigHandler(kvs consul.KVPairs) {
 	}
 
 	type mt = map[string]interface{}
-	servicesMap := m["instances"].(mt)[InstanceID].(mt)["services"].(mt)
+	servicesMap := m["instances"].(mt)[InstanceID].(mt)["services"].(mt) // TODO use that json parsing library
 	incomingServices := Services{}
 	for s := range servicesMap {
 		service := Service(s)
@@ -87,8 +92,6 @@ func (agent *Agent) ConfigHandler(kvs consul.KVPairs) {
 		log.Fatal(err)
 	}
 	agent.configureServices(localServices)
-
-	HandlingServices = false
 }
 
 func (agent *Agent) getLocalServices() (Services, error) {
@@ -247,8 +250,6 @@ func (agent *Agent) stopService(service Service) error {
 }
 
 func (agent *Agent) configureService(service Service) error {
-	// log.Printf("configuring service: %s\n", string(service))
-
 	ctx := context.Background()
 	args := filters.NewArgs(
 		filters.Arg("label", "com.opencopilot.managed"),
