@@ -25,8 +25,6 @@ var (
 	InstanceID = os.Getenv("INSTANCE_ID")
 	// ConfigDir is the config directory of opencopilot on the host
 	ConfigDir = os.Getenv("CONFIG_DIR")
-	// HandlingServices is a global indicator of whether the ConfigHandler method is running
-	HandlingServices = false // this feels hacky...
 )
 
 const (
@@ -90,33 +88,33 @@ func servePrivateGRPC(server *server) {
 	}
 }
 
-// TODO: use a loop here instead of a recursive call, for debugging purposes
-func watchConfigTree(agent *Agent, prevIndex uint64, handler func(consul.KVPairs)) error {
+func watchConfigTree(agent *Agent, queue chan consul.KVPairs) {
 	kv := agent.consulCli.KV()
-	kvs, queryMeta, err := kv.List("instances/"+InstanceID+"/services/", &consul.QueryOptions{
-		WaitIndex: prevIndex,
-	})
-	if err != nil {
-		return err
+	var prevIndex uint64
+	for {
+		kvs, queryMeta, err := kv.List("instances/"+InstanceID+"/services/", &consul.QueryOptions{
+			WaitIndex: prevIndex,
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+		lastIndex := queryMeta.LastIndex
+		if prevIndex != lastIndex {
+			queue <- kvs
+			prevIndex = lastIndex
+		}
 	}
-	lastIndex := queryMeta.LastIndex
-	if prevIndex != lastIndex {
-		handler(kvs)
-	}
-	watchConfigTree(agent, lastIndex, handler)
-	return nil
 }
 
-func pollConfigTree(agent *Agent, interval time.Duration) {
-	time.Sleep(interval) // Give the watchConfigTree time to handle the "first" config change (on first boot of agent)
+func pollConfigTree(agent *Agent, queue chan consul.KVPairs, interval time.Duration) {
 	kv := agent.consulCli.KV()
 	for {
-		if !HandlingServices {
-			kvs, _, err := kv.List("instances/"+InstanceID+"/services", nil)
-			if err != nil {
-				log.Fatal(err)
-			}
-			agent.ConfigHandler(kvs)
+		kvs, _, err := kv.List("instances/"+InstanceID+"/services", nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if len(queue) < 3 { // if there are 3 more unhandled "sync" requests on the queue, just don't add another, in case things get backed up
+			queue <- kvs
 		}
 		time.Sleep(interval)
 	}
@@ -143,9 +141,10 @@ func main() {
 	}
 
 	agent := server.ToAgent()
+	queue := make(chan consul.KVPairs)
 
 	log.Println("Starting to watch Consul KV...")
-	go watchConfigTree(agent, 0, agent.ConfigHandler)
+	go watchConfigTree(agent, queue)
 
 	log.Println("Starting public gRPC...")
 	go servePublicGRPC(server)
@@ -153,8 +152,10 @@ func main() {
 	log.Println("Starting private gRPC...")
 	go servePrivateGRPC(server)
 
-	// TODO: think about how to handle this properly
 	log.Println("Starting to poll Consul KV...")
-	interval, _ := time.ParseDuration("15s")
-	pollConfigTree(agent, interval)
+	interval, _ := time.ParseDuration("15s") // Move this to an ENV var?
+	go pollConfigTree(agent, queue, interval)
+
+	log.Println("Starting config handler...")
+	agent.startConfigHandler(queue)
 }
