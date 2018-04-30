@@ -68,7 +68,7 @@ func (agent *Agent) sync(kvs consul.KVPairs) {
 		log.Panic(err)
 	}
 
-	_, valueType, _, err := jsonparser.Get(jsonString, "instances", InstanceID, "services")
+	servicesMapString, valueType, _, err := jsonparser.Get(jsonString, "instances", InstanceID, "services")
 	if valueType == jsonparser.NotExist {
 		agent.ensureServices(Services{})
 		return
@@ -78,13 +78,12 @@ func (agent *Agent) sync(kvs consul.KVPairs) {
 		log.Fatal(err)
 	}
 
-	type mt = map[string]interface{}
-	servicesMap := m["instances"].(mt)[InstanceID].(mt)["services"].(mt) // TODO use that json parsing library
 	incomingServices := Services{}
-	for s := range servicesMap {
-		service := Service(s)
+	jsonparser.ObjectEach(servicesMapString, func(key, value []byte, dataType jsonparser.ValueType, offset int) error {
+		service := Service(key)
 		incomingServices = append(incomingServices, service)
-	}
+		return nil
+	})
 
 	agent.ensureServices(incomingServices)
 	localServices, err := agent.getLocalServices()
@@ -249,7 +248,34 @@ func (agent *Agent) stopService(service Service) error {
 	return nil
 }
 
-func (agent *Agent) configureService(service Service) error {
+func (agent *Agent) getServiceConfig(service Service) ([]byte, error) {
+	kv := agent.consulCli.KV()
+	kvs, _, err := kv.List("instances/"+InstanceID+"/services/"+string(service), &consul.QueryOptions{})
+	if err != nil {
+		log.Fatal(err)
+	}
+	configMap, err := consulkvjson.ConsulKVsToJSON(kvs)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	configString, err := json.Marshal(configMap)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	serviceConfig, dataType, _, err := jsonparser.Get(configString, "instances", InstanceID, "services", string(service))
+	if err != nil {
+		log.Fatal(err)
+	}
+	if dataType == jsonparser.NotExist {
+		log.Println(errors.New("invalid JSON"))
+	}
+
+	return serviceConfig, nil
+}
+
+func (agent *Agent) getServiceGRPCPort(service Service) (uint16, error) {
 	ctx := context.Background()
 	args := filters.NewArgs(
 		filters.Arg("label", "com.opencopilot.managed"),
@@ -259,55 +285,43 @@ func (agent *Agent) configureService(service Service) error {
 		Filters: args,
 	})
 	if err != nil {
-		log.Fatal(err)
+		return 0, err
 	}
-
-	kv := agent.consulCli.KV()
 
 	for _, container := range containers {
-		// log.Println(container.Ports)
-		var gRPCPort uint16
 		for _, portPair := range container.Ports {
 			if portPair.PrivatePort == 50052 {
-				gRPCPort = portPair.PublicPort
+				return portPair.PublicPort, nil
 			}
 		}
-
-		kvs, _, err := kv.List("instances/"+InstanceID+"/services/"+string(service), &consul.QueryOptions{})
-		if err != nil {
-			log.Fatal(err)
-		}
-		configMap, err := consulkvjson.ConsulKVsToJSON(kvs)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		configString, err := json.Marshal(configMap)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		serviceConfig, dataType, _, err := jsonparser.Get(configString, "instances", InstanceID, "services", string(service))
-		if err != nil {
-			log.Fatal(err)
-		}
-		if dataType == jsonparser.NotExist {
-			log.Println(errors.New("invalid JSON"))
-		}
-
-		conn, err := grpc.Dial("localhost:"+strconv.Itoa(int(gRPCPort)), grpc.WithInsecure())
-		if err != nil {
-			log.Fatalf("fail to dial: %v", err)
-		}
-		defer conn.Close()
-
-		client := managerPb.NewManagerClient(conn)
-		_, errConfiguring := client.Configure(ctx, &managerPb.ConfigureRequest{Config: string(serviceConfig)})
-		if errConfiguring != nil {
-			return errConfiguring
-		}
-
 	}
+
+	return 0, errors.New("Could not find gRPC port")
+}
+
+func (agent *Agent) configureService(service Service) error {
+	serviceConfig, err := agent.getServiceConfig(service)
+	if err != nil {
+		return err
+	}
+
+	gRPCPort, err := agent.getServiceGRPCPort(service)
+	if err != nil {
+		return err
+	}
+
+	conn, err := grpc.Dial("localhost:"+strconv.Itoa(int(gRPCPort)), grpc.WithInsecure())
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	client := managerPb.NewManagerClient(conn)
+	_, errConfiguring := client.Configure(context.Background(), &managerPb.ConfigureRequest{Config: string(serviceConfig)})
+	if errConfiguring != nil {
+		return errConfiguring
+	}
+
 	return nil
 }
 
