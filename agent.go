@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/ioutil"
 	"log"
+	"strconv"
 
 	"github.com/docker/docker/api/types/filters"
+	"google.golang.org/grpc"
 
 	"github.com/buger/jsonparser"
 	dockerTypes "github.com/docker/docker/api/types"
@@ -14,6 +17,7 @@ import (
 	dockerClient "github.com/docker/docker/client"
 	consul "github.com/hashicorp/consul/api"
 	pb "github.com/opencopilot/agent/agent"
+	managerPb "github.com/opencopilot/agent/manager"
 	consulkvjson "github.com/opencopilot/consul-kv-json"
 )
 
@@ -45,6 +49,7 @@ func AgentGetStatus(ctx context.Context) (*pb.AgentStatus, error) {
 
 // ConfigHandler runs when the service configuration for this instance changes
 func ConfigHandler(kvs consul.KVPairs) {
+	HandlingServices = true
 	m, err := consulkvjson.ConsulKVsToJSON(kvs)
 	if err != nil {
 		log.Panic(err)
@@ -73,6 +78,13 @@ func ConfigHandler(kvs consul.KVPairs) {
 	}
 
 	ensureServices(incomingServices)
+	localServices, err := getLocalServices()
+	if err != nil {
+		log.Fatal(err)
+	}
+	configureServices(localServices)
+
+	HandlingServices = false
 }
 
 func getLocalServices() (Services, error) {
@@ -93,7 +105,7 @@ func getLocalServices() (Services, error) {
 
 	localServices := Services{}
 	for _, container := range containers {
-		serviceName, found := container.Labels["com.opencopilot.service"]
+		serviceName, found := container.Labels["com.opencopilot.service-manager"]
 		if !found {
 			continue
 		}
@@ -156,7 +168,7 @@ func ensureServices(incomingServices Services) {
 }
 
 func startService(service Service) error {
-	log.Printf("Adding service: %s\n", string(service))
+	log.Printf("adding service: %s\n", string(service))
 
 	dockerCli, err := dockerClient.NewEnvClient()
 	if err != nil {
@@ -171,8 +183,8 @@ func startService(service Service) error {
 		containerConfig = &container.Config{
 			Image: "quay.io/opencopilot/haproxy-manager",
 			Labels: map[string]string{
-				"com.opencopilot.managed": "",
-				"com.opencopilot.service": string(service),
+				"com.opencopilot.managed":         "",
+				"com.opencopilot.service-manager": string(service),
 			},
 		}
 	default:
@@ -183,25 +195,37 @@ func startService(service Service) error {
 	if err != nil {
 		return err
 	}
-	reader.Close()
+
+	defer reader.Close()
+	if _, err := ioutil.ReadAll(reader); err != nil {
+		log.Panic(err)
+	}
+
+	containerConfig.Env = []string{"CONFIG_DIR=" + ConfigDir, "INSTANCE_ID=" + InstanceID}
 
 	res, err := dockerCli.ContainerCreate(ctx, containerConfig, &container.HostConfig{
 		AutoRemove: true, // Important to remove container after it's stopped, so that we can start a new one up with the same name if this service gets re-added
-	}, nil, "com.opencopilot.service."+string(service))
+		Privileged: true, // So that the manager containers can start other docker containers,
+		Binds: []string{ // So that the manager containers have access to Docker on the host
+			"/var/run/docker.sock:/var/run/docker.sock",
+			ConfigDir + ":" + ConfigDir,
+		},
+		PublishAllPorts: true,
+	}, nil, "com.opencopilot.service-manager."+string(service))
 	if err != nil {
 		return err
 	}
 
-	err2 := dockerCli.ContainerStart(ctx, res.ID, dockerTypes.ContainerStartOptions{})
-	if err2 != nil {
-		return err
+	startErr := dockerCli.ContainerStart(ctx, res.ID, dockerTypes.ContainerStartOptions{})
+	if startErr != nil {
+		return startErr
 	}
 
 	return nil
 }
 
 func stopService(service Service) error {
-	log.Printf("Stopping service: %s\n", string(service))
+	log.Printf("stopping service: %s\n", string(service))
 	dockerCli, err := dockerClient.NewEnvClient()
 	if err != nil {
 		return err
@@ -210,9 +234,9 @@ func stopService(service Service) error {
 	ctx := context.Background()
 	args := filters.NewArgs(
 		filters.Arg("label", "com.opencopilot.managed"),
-		filters.Arg("name", "com.opencopilot.service."+string(service)),
+		filters.Arg("name", "com.opencopilot.service-manager."+string(service)),
 	)
-	containers, err := dockerCli.ContainerList(context.Background(), dockerTypes.ContainerListOptions{
+	containers, err := dockerCli.ContainerList(ctx, dockerTypes.ContainerListOptions{
 		Filters: args,
 	})
 	if err != nil {
@@ -225,6 +249,85 @@ func stopService(service Service) error {
 	return nil
 }
 
-func configureService() {
+func configureService(service Service) error {
+	// log.Printf("configuring service: %s\n", string(service))
+	dockerCli, err := dockerClient.NewEnvClient()
+	if err != nil {
+		return err
+	}
 
+	ctx := context.Background()
+	args := filters.NewArgs(
+		filters.Arg("label", "com.opencopilot.managed"),
+		filters.Arg("name", "com.opencopilot.service-manager."+string(service)),
+	)
+	containers, err := dockerCli.ContainerList(ctx, dockerTypes.ContainerListOptions{
+		Filters: args,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	consulClient, err := consul.NewClient(consul.DefaultConfig())
+	if err != nil {
+		log.Fatal(err)
+	}
+	kv := consulClient.KV()
+
+	for _, container := range containers {
+		// log.Println(container.Ports)
+		var gRPCPort uint16
+		for _, portPair := range container.Ports {
+			if portPair.PrivatePort == 50052 {
+				gRPCPort = portPair.PublicPort
+			}
+		}
+
+		kvs, _, err := kv.List("instances/"+InstanceID+"/services/"+string(service), &consul.QueryOptions{})
+		if err != nil {
+			log.Fatal(err)
+		}
+		configMap, err := consulkvjson.ConsulKVsToJSON(kvs)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		configString, err := json.Marshal(configMap)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		serviceConfig, dataType, _, err := jsonparser.Get(configString, "instances", InstanceID, "services", string(service))
+		if err != nil {
+			log.Fatal(err)
+		}
+		if dataType == jsonparser.NotExist {
+			log.Println(errors.New("invalid JSON"))
+		}
+
+		conn, err := grpc.Dial("localhost:"+strconv.Itoa(int(gRPCPort)), grpc.WithInsecure())
+		if err != nil {
+			log.Fatalf("fail to dial: %v", err)
+		}
+		defer conn.Close()
+
+		client := managerPb.NewManagerClient(conn)
+		_, errConfiguring := client.Configure(ctx, &managerPb.ConfigureRequest{Config: string(serviceConfig)})
+		if errConfiguring != nil {
+			return errConfiguring
+		}
+
+	}
+	return nil
+}
+
+func configureServices(services Services) []error {
+	var errorList []error
+	for _, service := range services {
+		err := configureService(service)
+		if err != nil {
+			errorList = append(errorList, err)
+		}
+	}
+	return errorList
 }

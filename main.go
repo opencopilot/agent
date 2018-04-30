@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"time"
 
 	docker "github.com/docker/docker/client"
 	consul "github.com/hashicorp/consul/api"
@@ -24,6 +25,10 @@ import (
 var (
 	// InstanceID is the identifier of this agent/device
 	InstanceID = os.Getenv("INSTANCE_ID")
+	// ConfigDir is the config directory of opencopilot on the host
+	ConfigDir = os.Getenv("CONFIG_DIR")
+	// HandlingServices is a global indicator of whether the ConfigHandler method is running
+	HandlingServices = false // this feels hacky...
 )
 
 const (
@@ -107,6 +112,7 @@ func getManagerClient(port int) (pbManager.ManagerClient, *grpc.ClientConn) {
 	return pbManager.NewManagerClient(conn), conn
 }
 
+// TODO: use a loop here instead of a recursive call, for debugging purposes
 func watchConfigTree(consulClient *consul.Client, prevIndex uint64, handler func(consul.KVPairs)) error {
 	kv := consulClient.KV()
 	kvs, queryMeta, err := kv.List("instances/"+InstanceID+"/services/", &consul.QueryOptions{
@@ -123,6 +129,21 @@ func watchConfigTree(consulClient *consul.Client, prevIndex uint64, handler func
 	return nil
 }
 
+func pollConfigTree(consulClient *consul.Client, interval time.Duration) {
+	time.Sleep(interval) // Give the watchConfigTree time to handle the "first" config change (on first boot of agent)
+	kv := consulClient.KV()
+	for {
+		if !HandlingServices {
+			kvs, _, err := kv.List("instances/"+InstanceID+"/services", nil)
+			if err != nil {
+				log.Fatal(err)
+			}
+			ConfigHandler(kvs)
+		}
+		time.Sleep(interval)
+	}
+}
+
 func main() {
 	if InstanceID == "" {
 		panic(errors.New("No instance ID specified"))
@@ -132,10 +153,18 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	log.Println("Starting to watch Consul KV...")
 	go watchConfigTree(consulClient, 0, ConfigHandler)
 
 	log.Println("Starting public gRPC...")
 	go servePublicGRPC()
+
 	log.Println("Starting private gRPC...")
-	servePrivateGRPC()
+	go servePrivateGRPC()
+
+	// TODO: think about how to handle this properly
+	log.Println("Starting to poll Consul KV...")
+	interval, _ := time.ParseDuration("15s")
+	pollConfigTree(consulClient, interval)
 }
