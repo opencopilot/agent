@@ -113,8 +113,10 @@ func pollConfigTree(agent *Agent, queue chan consul.KVPairs, interval time.Durat
 		if err != nil {
 			log.Fatal(err)
 		}
-		if len(queue) < 3 { // if there are 3 more unhandled "sync" requests on the queue, just don't add another, in case things get backed up
-			queue <- kvs
+		select {
+		case queue <- kvs:
+		default:
+			// something is already in the queue, lets not add to
 		}
 		time.Sleep(interval)
 	}
@@ -125,7 +127,12 @@ func main() {
 		panic(errors.New("No instance ID specified"))
 	}
 
-	consulCli, err := consul.NewClient(consul.DefaultConfig())
+	consulClientConfig := consul.DefaultConfig()
+	if os.Getenv("ENV") == "dev" {
+		consulClientConfig.Address = "host.docker.internal:8500"
+	}
+
+	consulCli, err := consul.NewClient(consulClientConfig)
 	if err != nil {
 		log.Fatalf("failed to initialize consul client")
 	}
@@ -141,7 +148,7 @@ func main() {
 	}
 
 	agent := server.ToAgent()
-	queue := make(chan consul.KVPairs)
+	queue := make(chan consul.KVPairs, 1)
 
 	log.Println("Starting to watch Consul KV...")
 	go watchConfigTree(agent, queue)

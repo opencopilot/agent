@@ -18,7 +18,7 @@ import (
 	consul "github.com/hashicorp/consul/api"
 	pb "github.com/opencopilot/agent/agent"
 	managerPb "github.com/opencopilot/agent/manager"
-	"github.com/opencopilot/consul-kv-json"
+	"github.com/opencopilot/consulkvjson"
 	"gopkg.in/yaml.v2"
 )
 
