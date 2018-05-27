@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	dockerClient "github.com/docker/docker/client"
 	consul "github.com/hashicorp/consul/api"
 	pb "github.com/opencopilot/agent/agent"
 	"go.uber.org/zap"
