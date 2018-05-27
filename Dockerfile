@@ -23,6 +23,7 @@ COPY . .
 # generate gRPC
 RUN protoc -I ./manager ./manager/Manager.proto --go_out=plugins=grpc:./manager
 RUN protoc -I ./agent ./agent/Agent.proto --go_out=plugins=grpc:./agent
+RUN protoc -I ./health ./health/*.proto --go_out=plugins=grpc:./health
 
 # https://github.com/moby/moby/issues/28269#issuecomment-382149133
 RUN go get github.com/docker/docker/client

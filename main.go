@@ -11,6 +11,7 @@ import (
 	dockerClient "github.com/docker/docker/client"
 	consul "github.com/hashicorp/consul/api"
 	pb "github.com/opencopilot/agent/agent"
+	pbHealth "github.com/opencopilot/agent/health"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -29,11 +30,12 @@ var (
 )
 
 const (
-	port = 50051
+	port       = 50051
+	healthPort = 50060
 )
 
 func servePublicGRPC(server *server) {
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(port))
+	lis, err := net.Listen("tcp", ":"+strconv.Itoa(healthPort))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -141,6 +143,29 @@ func registerService(consulCli *consul.Client) {
 	}
 }
 
+func serveHealthCheckEndpoint(health *health) {
+	lis, err := net.Listen("tcp", ":"+strconv.Itoa(healthPort))
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+
+	// TODO: TLS for gRPC connection to outside world
+	// creds, err := credentials.NewServerTLSFromFile("server.crt", "server.key")
+	// if err != nil {
+	// 	log.Fatalf("failed to load credentials: %v", err)
+	// }
+
+	s := grpc.NewServer()
+
+	pbHealth.RegisterHealthServer(s, health)
+	// Register reflection service on gRPC server.
+	reflection.Register(s)
+	s.Serve(lis)
+	if err := s.Serve(lis); err != nil {
+		log.Fatalf("failed to serve: %v", err)
+	}
+}
+
 func main() {
 	if InstanceID == "" {
 		panic(errors.New("No instance ID specified"))
@@ -177,6 +202,9 @@ func main() {
 
 	log.Println("starting private gRPC...")
 	go servePrivateGRPC(server)
+
+	log.Println("starting health check service...")
+	go serveHealthCheckEndpoint(&health{})
 
 	log.Println("registering service...")
 	registerService(consulCli)

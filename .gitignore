@@ -15,4 +15,5 @@
 
 agent/*.go
 manager/*.go
+health/*.go
 cmd/

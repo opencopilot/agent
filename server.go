@@ -5,6 +5,7 @@ import (
 	"context"
 
 	pb "github.com/opencopilot/agent/agent"
+	pbHealth "github.com/opencopilot/agent/health"
 
 	dockerTypes "github.com/docker/docker/api/types"
 	docker "github.com/docker/docker/client"
@@ -16,6 +17,8 @@ type server struct {
 	consulCli *consul.Client
 }
 
+type health struct{}
+
 func (s *server) ToAgent() *Agent {
 	return &Agent{
 		dockerCli: s.dockerCli,
@@ -23,9 +26,9 @@ func (s *server) ToAgent() *Agent {
 	}
 }
 
-func (s *server) Check(ctx context.Context, in *pb.HealthCheckRequest) (*pb.HealthCheckResponse, error) {
-	return &pb.HealthCheckResponse{
-		Status: pb.HealthCheckResponse_SERVING,
+func (s *health) Check(ctx context.Context, in *pbHealth.HealthCheckRequest) (*pbHealth.HealthCheckResponse, error) {
+	return &pbHealth.HealthCheckResponse{
+		Status: pbHealth.HealthCheckResponse_SERVING,
 	}, nil
 }
 
