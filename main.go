@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	docker "github.com/docker/docker/client"
 	consul "github.com/hashicorp/consul/api"
 	pb "github.com/opencopilot/agent/agent"
 	"go.uber.org/zap"
@@ -127,7 +126,7 @@ func registerService(consulCli *consul.Client) {
 	agent := consulCli.Agent()
 	err := agent.ServiceRegister(&consul.AgentServiceRegistration{
 		ID:   InstanceID,
-		Name: "open-copilot-agent",
+		Name: "opencopilot-agent",
 		Port: port,
 		Check: &consul.AgentServiceCheck{
 			CheckID:  "agent-grpc",
@@ -156,7 +155,7 @@ func main() {
 		log.Fatalf("failed to initialize consul client")
 	}
 
-	dockerCli, err := docker.NewEnvClient()
+	dockerCli, err := dockerClient.NewClientWithOpts(dockerClient.WithVersion("1.37"))
 	if err != nil {
 		log.Fatalf("failed to initialize docker client")
 	}
