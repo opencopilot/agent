@@ -33,6 +33,6 @@ RUN go get -v -x
 
 RUN go build -o cmd/agent
 
-EXPOSE 50050
+EXPOSE 50051
 
 ENTRYPOINT [ "cmd/agent" ]
