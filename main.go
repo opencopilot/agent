@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	docker "github.com/docker/docker/client"
@@ -32,7 +33,7 @@ const (
 )
 
 func servePublicGRPC(server *server) {
-	lis, err := net.Listen("tcp", ":"+string(port))
+	lis, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -126,8 +127,14 @@ func registerService(consulCli *consul.Client) {
 	agent := consulCli.Agent()
 	err := agent.ServiceRegister(&consul.AgentServiceRegistration{
 		ID:   InstanceID,
-		Name: "OpenCoPilot Agent",
+		Name: "open-copilot-agent",
 		Port: port,
+		Check: &consul.AgentServiceCheck{
+			CheckID:  "agent-grpc",
+			Name:     "Agent gRPC Health Check",
+			GRPC:     "127.0.0.1:" + strconv.Itoa(port),
+			Interval: "10s",
+		},
 	})
 	if err != nil {
 		log.Panic(err)
