@@ -31,7 +31,7 @@ var (
 
 const (
 	port       = 50051
-	healthPort = 50060
+	healthPort = 50053
 )
 
 func servePublicGRPC(server *server) {
