@@ -23,6 +23,12 @@ func (s *server) ToAgent() *Agent {
 	}
 }
 
+func (s *server) Check(ctx context.Context, in *pb.HealthCheckRequest) (*pb.HealthCheckResponse, error) {
+	return &pb.HealthCheckResponse{
+		Status: pb.HealthCheckResponse_SERVING,
+	}, nil
+}
+
 func (s *server) GetStatus(ctx context.Context, in *pb.AgentStatusRequest) (*pb.AgentStatus, error) {
 	agent := s.ToAgent()
 	return agent.AgentGetStatus(ctx)

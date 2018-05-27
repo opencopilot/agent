@@ -137,7 +137,7 @@ func registerService(consulCli *consul.Client) {
 		},
 	})
 	if err != nil {
-		log.Panic(err)
+		log.Fatal(err)
 	}
 }
 

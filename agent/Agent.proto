@@ -2,33 +2,29 @@ syntax = "proto3";
 package opencopilot;
 
 service Agent {
+    rpc Check(HealthCheckRequest) returns (HealthCheckResponse) {}
     rpc GetStatus(AgentStatusRequest) returns (AgentStatus) {}
-    // rpc StartService(StartServiceRequest) returns (Status) {}
-    // rpc ConfigureService(ConfigureServiceRequest) returns (Status) {}
-    // rpc StopService(StopServiceRequest) returns (Status) {}
     rpc GetServiceLogs(GetServiceLogsRequest) returns (stream ServiceLogLine) {}
+}
 
-    // rpc SetServiceGRPC(SetServiceGRPCRequest) returns (AgentStatus) {}
+message HealthCheckRequest {
+    string service = 1;
+  }
+  
+  message HealthCheckResponse {
+    enum ServingStatus {
+      UNKNOWN = 0;
+      SERVING = 1;
+      NOT_SERVING = 2;
+    }
+    ServingStatus status = 1;
 }
 
 message AgentStatusRequest {}
 
-// message StartServiceRequest {
-//     string image_ref = 1;
-// }
-
-// message ConfigureServiceRequest {
-//     string container_id = 1;
-// }
-
 message StopServiceRequest {
     string container_id = 1;
 }
-
-// message SetServiceGRPCRequest {
-//     string container_id = 1;
-//     int32 port = 2;
-// }
 
 message GetServiceLogsRequest {
     string container_id = 1;
