@@ -35,7 +35,7 @@ const (
 )
 
 func servePublicGRPC(server *server) {
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(healthPort))
+	lis, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
