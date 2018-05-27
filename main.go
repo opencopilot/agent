@@ -134,7 +134,7 @@ func registerService(consulCli *consul.Client) {
 		Check: &consul.AgentServiceCheck{
 			CheckID:  "agent-grpc",
 			Name:     "Agent gRPC Health Check",
-			GRPC:     "127.0.0.1:" + strconv.Itoa(port),
+			GRPC:     "127.0.0.1:" + strconv.Itoa(healthPort),
 			Interval: "10s",
 		},
 	})
