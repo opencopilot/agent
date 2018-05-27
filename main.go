@@ -28,11 +28,11 @@ var (
 )
 
 const (
-	port = ":50051"
+	port = 50051
 )
 
 func servePublicGRPC(server *server) {
-	lis, err := net.Listen("tcp", port)
+	lis, err := net.Listen("tcp", ":"+string(port))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -122,6 +122,18 @@ func pollConfigTree(agent *Agent, queue chan consul.KVPairs, interval time.Durat
 	}
 }
 
+func registerService(consulCli *consul.Client) {
+	agent := consulCli.Agent()
+	err := agent.ServiceRegister(&consul.AgentServiceRegistration{
+		ID:   InstanceID,
+		Name: "OpenCoPilot Agent",
+		Port: port,
+	})
+	if err != nil {
+		log.Panic(err)
+	}
+}
+
 func main() {
 	if InstanceID == "" {
 		panic(errors.New("No instance ID specified"))
@@ -150,19 +162,22 @@ func main() {
 	agent := server.ToAgent()
 	queue := make(chan consul.KVPairs, 1)
 
-	log.Println("Starting to watch Consul KV...")
+	log.Println("starting to watch Consul KV...")
 	go watchConfigTree(agent, queue)
 
-	log.Println("Starting public gRPC...")
+	log.Println("starting public gRPC...")
 	go servePublicGRPC(server)
 
-	log.Println("Starting private gRPC...")
+	log.Println("starting private gRPC...")
 	go servePrivateGRPC(server)
 
-	log.Println("Starting to poll Consul KV...")
+	log.Println("registering service...")
+	registerService(consulCli)
+
+	log.Println("starting to poll Consul KV...")
 	interval, _ := time.ParseDuration("15s") // Move this to an ENV var?
 	go pollConfigTree(agent, queue, interval)
 
-	log.Println("Starting config handler...")
+	log.Println("starting config handler...")
 	agent.startConfigHandler(queue)
 }
