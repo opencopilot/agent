@@ -38,12 +38,12 @@ func (s *server) GetStatus(ctx context.Context, in *pb.AgentStatusRequest) (*pb.
 }
 
 func (s *server) GetServiceLogs(in *pb.GetServiceLogsRequest, stream pb.Agent_GetServiceLogsServer) error {
-
-	options := dockerTypes.ContainerLogsOptions{ShowStdout: true}
+	options := dockerTypes.ContainerLogsOptions{ShowStderr: true}
 	out, err := s.dockerCli.ContainerLogs(context.Background(), in.ContainerId, options)
 	if err != nil {
 		return err
 	}
+	defer out.Close()
 
 	scanner := bufio.NewScanner(out)
 
