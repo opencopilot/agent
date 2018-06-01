@@ -26,11 +26,14 @@ RUN protoc -I ./agent ./agent/Agent.proto --go_out=plugins=grpc:./agent
 RUN protoc -I ./health ./health/*.proto --go_out=plugins=grpc:./health
 
 # https://github.com/moby/moby/issues/28269#issuecomment-382149133
-RUN go get github.com/docker/docker/client
-RUN rm -rf /go/src/github.com/docker/docker/vendor/github.com/docker/go-connections
-RUN go get github.com/docker/go-connections/nat
-RUN go get github.com/pkg/errors
-RUN go get -v -x
+# RUN go get github.com/docker/docker/client
+# RUN rm -rf /go/src/github.com/docker/docker/vendor/github.com/docker/go-connections
+# RUN go get github.com/docker/go-connections/nat
+# RUN go get github.com/pkg/errors
+# RUN go get -v -x
+ENV DEP_VER 0.4.1
+RUN curl -fsSL -o /usr/local/bin/dep https://github.com/golang/dep/releases/download/v${DEP_VER}/dep-linux-amd64 && chmod +x /usr/local/bin/dep
+RUN dep ensure -vendor-only -v
 
 RUN go build -o cmd/agent
 

@@ -1,1 +1,2 @@
 LB: "quay.io/opencopilot/haproxy-manager"
+lb-haproxy: "quay.io/opencopilot/haproxy-manager"
