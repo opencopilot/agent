@@ -26,7 +26,7 @@ func (s *server) ToAgent() *Agent {
 	}
 }
 
-func (s *health) Check(ctx context.Context, in *pbHealth.HealthCheckRequest) (*pbHealth.HealthCheckResponse, error) {
+func (s *server) Check(ctx context.Context, in *pbHealth.HealthCheckRequest) (*pbHealth.HealthCheckResponse, error) {
 	return &pbHealth.HealthCheckResponse{
 		Status: pbHealth.HealthCheckResponse_SERVING,
 	}, nil

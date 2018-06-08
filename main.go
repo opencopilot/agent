@@ -30,8 +30,7 @@ var (
 )
 
 const (
-	port       = 50051
-	healthPort = 50053
+	port = 50051
 )
 
 func servePublicGRPC(server *server) {
@@ -67,6 +66,7 @@ func servePublicGRPC(server *server) {
 	)
 
 	pb.RegisterAgentServer(s, server)
+	pbHealth.RegisterHealthServer(s, server)
 	// Register reflection service on gRPC server.
 	reflection.Register(s)
 	s.Serve(lis)
@@ -134,35 +134,12 @@ func registerService(consulCli *consul.Client) {
 		Check: &consul.AgentServiceCheck{
 			CheckID:  "agent-grpc",
 			Name:     "Agent gRPC Health Check",
-			GRPC:     "127.0.0.1:" + strconv.Itoa(healthPort),
+			GRPC:     "127.0.0.1:" + strconv.Itoa(port),
 			Interval: "10s",
 		},
 	})
 	if err != nil {
 		log.Fatal(err)
-	}
-}
-
-func serveHealthCheckEndpoint(health *health) {
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(healthPort))
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-
-	// TODO: TLS for gRPC connection to outside world
-	// creds, err := credentials.NewServerTLSFromFile("server.crt", "server.key")
-	// if err != nil {
-	// 	log.Fatalf("failed to load credentials: %v", err)
-	// }
-
-	s := grpc.NewServer()
-
-	pbHealth.RegisterHealthServer(s, health)
-	// Register reflection service on gRPC server.
-	reflection.Register(s)
-	s.Serve(lis)
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
 	}
 }
 
@@ -202,9 +179,6 @@ func main() {
 
 	log.Println("starting private gRPC...")
 	go servePrivateGRPC(server)
-
-	log.Println("starting health check service...")
-	go serveHealthCheckEndpoint(&health{})
 
 	log.Println("registering service...")
 	registerService(consulCli)

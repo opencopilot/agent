@@ -183,7 +183,7 @@ func (agent *Agent) startService(service Service) error {
 	}
 
 	if serviceImageMap[string(service)] == nil {
-		log.Fatal(errors.New("invalid service specified"))
+		return errors.New("invalid service specified")
 	}
 
 	containerConfig := &container.Config{
